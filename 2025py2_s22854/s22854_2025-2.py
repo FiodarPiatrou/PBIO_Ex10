@@ -1,6 +1,11 @@
 from Bio import Entrez
-import time
-import os
+from Bio import SeqIO
+from io import StringIO
+import matplotlib
+
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import csv
 
 
 class NCBIRetriever:
@@ -14,12 +19,12 @@ class NCBIRetriever:
         Entrez.api_key = api_key
         Entrez.tool = 'BioScriptEx10'
 
-    def search_taxid(self, taxid,min_len=None,max_len=None):
+    def search_taxid(self, taxid, min_len=None, max_len=None):
         """Search for all records associated with a taxonomic ID."""
         print(f"Searching for records with taxID: {taxid}")
         try:
-            is_min_len=min_len is not None
-            is_max_len=max_len is not None
+            is_min_len = min_len is not None
+            is_max_len = max_len is not None
             if is_max_len and is_min_len and min_len > max_len:
                 print("min_len must be < max_len")
                 return None
@@ -85,6 +90,73 @@ class NCBIRetriever:
             return ""
 
 
+def plot_sequence_lengths(records, output_file="sequence_lengths.png"):
+    if not records:
+        print("No records to plot.")
+        return
+
+    # Sort records by length (descending)
+    sorted_records = sorted(records, key=lambda x: x["length"], reverse=True)
+    accessions = [rec["accession"] for rec in sorted_records]
+    lengths = [rec["length"] for rec in sorted_records]
+
+    # Create the plot
+    plt.figure(figsize=(12, 6))
+    plt.plot(accessions, lengths, marker="o", linestyle="-", color="b")
+
+    # Customize the plot
+    plt.title("Sequence Lengths by GenBank Accession", fontsize=14)
+    plt.xlabel("GenBank Accession Number", fontsize=12)
+    plt.ylabel("Sequence Length (bp)", fontsize=12)
+    plt.xticks(rotation=45, ha="right", fontsize=8)  # Rotate x-axis labels
+    plt.grid(axis="y", linestyle="--", alpha=0.7)
+
+    # Adjust layout to prevent label clipping
+    plt.tight_layout()
+
+    # Save the plot
+    plt.savefig(output_file, dpi=300, bbox_inches="tight")
+    plt.close()
+    print(f"Plot saved to: {output_file}")
+
+
+def parse_genbank_records(genbank_text):
+    records = []
+    try:
+        # Use StringIO to handle multi-record GenBank text
+        handle = StringIO(genbank_text)
+        for record in SeqIO.parse(handle, "gb"):
+            records.append({
+                "accession": record.id,
+                "length": len(record.seq),
+                "description": record.description
+            })
+    except Exception as e:
+        print(f"Error parsing GenBank records: {e}")
+    return records
+
+
+def generate_csv_report(records, output_file="genbank_report.csv"):
+    if not records:
+        print("No records to export.")
+        return False
+
+    try:
+        with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
+            fieldnames = ["accession", "length", "description"]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            writer.writeheader()
+            for record in records:
+                writer.writerow(record)
+
+        print(f"Report saved to: {output_file}")
+        return True
+    except Exception as e:
+        print(f"Error writing CSV: {e}")
+        return False
+
+
 def main():
     # Uzyskaj dane uwierzytelniające
     email = input("Enter your email address for NCBI: ")
@@ -109,6 +181,14 @@ def main():
     # Pobierz kilka pierwszych rekordów jako próbkę
     print("\nFetching sample records...")
     sample_records = retriever.fetch_records(start=0, max_records=5)
+    # Zapis do pliku CSV
+    parsed_records = parse_genbank_records(sample_records)
+    if parsed_records:
+        generate_csv_report(parsed_records, output_file=f"taxid_{taxid}_report.csv")
+    plot_sequence_lengths(
+        parsed_records,
+        output_file=f"taxid_{taxid}_sequence_lengths.png"
+    )
 
     # Zapisz do pliku
     output_file = f"taxid_{taxid}_sample.gb"
@@ -116,7 +196,6 @@ def main():
         f.write(sample_records)
 
     print(f"Saved sample records to {output_file}")
-    print("\nNote: This is just a basic retriever. You need to extend its functionality!")
 
 
 if __name__ == "__main__":
